@@ -1,0 +1,111 @@
+# infra/docker-compose.yml
+#
+# Local infrastructure for AI Code Breaker: PostgreSQL, Redis, the API, and
+# the analysis worker.
+#
+# Usage (from the repo root):
+#   docker compose -f infra/docker-compose.yml up -d
+#
+# The default credentials/URLs below match the defaults in
+# apps/backend/app/core/config.py, so no extra configuration is needed to
+# connect locally. Set ANTHROPIC_API_KEY in your environment (or an .env
+# file) to enable the optional Claude stages; without it, the worker uses
+# the deterministic fallbacks.
+#
+# Runner note: the worker executes submitted code via the sandboxed Docker
+# runner, which means it needs access to a Docker daemon. For local use it
+# mounts the host Docker socket. This is a convenience for development, not
+# a hardened production setup — see runner/README.md for the security model.
+
+services:
+  postgres:
+    image: postgres:16
+    container_name: acb-postgres
+    environment:
+      POSTGRES_USER: acb
+      POSTGRES_PASSWORD: acb
+      POSTGRES_DB: ai_code_breaker
+    ports:
+      - "5432:5432"
+    volumes:
+      - acb_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U acb -d ai_code_breaker"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7
+    container_name: acb-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - acb_redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  api:
+    build:
+      context: ..
+      dockerfile: apps/backend/Dockerfile
+    container_name: acb-api
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+psycopg://acb:acb@postgres:5432/ai_code_breaker
+      REDIS_URL: redis://redis:6379/0
+      # The API doesn't run submitted code, so the subprocess backend is a
+      # safe default for it; the worker uses the Docker backend.
+      EXECUTION_BACKEND: subprocess
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-sonnet-4-5}
+      CORS_ALLOW_ORIGINS: ${CORS_ALLOW_ORIGINS:-http://localhost:3000}
+    ports:
+      - "8000:8000"
+    # Apply migrations, then start the API.
+    command: >
+      sh -c "alembic upgrade head &&
+             uvicorn app.main:app --host 0.0.0.0 --port 8000"
+
+  worker:
+    build:
+      context: ..
+      dockerfile: apps/backend/Dockerfile
+    container_name: acb-worker
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+psycopg://acb:acb@postgres:5432/ai_code_breaker
+      REDIS_URL: redis://redis:6379/0
+      # The worker runs submitted code. For local dev we default to the
+      # subprocess backend so `docker compose up --build` works out of the box:
+      # the runner script ships in the image (see apps/backend/Dockerfile,
+      # RUNNER_SCRIPT_PATH=/app/runner/runner.py). The Docker runner gives
+      # stronger isolation but requires the separate ai-code-breaker-runner
+      # image to be built first; opt in with WORKER_EXECUTION_BACKEND=docker
+      # once you've built it. Production uses the Docker backend (see
+      # docker-compose.prod.yml).
+      EXECUTION_BACKEND: ${WORKER_EXECUTION_BACKEND:-subprocess}
+      DOCKER_RUNNER_IMAGE: ai-code-breaker-runner:latest
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-sonnet-4-5}
+    # Mount the host Docker socket so the worker CAN launch runner containers
+    # if switched to the docker backend. Development convenience — see the
+    # note at the top. Not needed for the default subprocess backend.
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    command: ["python", "-m", "app.worker.run_worker"]
+
+volumes:
+  acb_pgdata:
+  acb_redisdata:

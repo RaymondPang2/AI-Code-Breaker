@@ -1,0 +1,16 @@
+fastapi==0.115.0
+uvicorn[standard]==0.30.6
+pydantic==2.9.2
+pydantic-settings==2.5.2
+hypothesis==6.115.5
+sqlalchemy==2.0.36
+alembic==1.13.3
+psycopg[binary]==3.2.3
+anthropic==0.39.0
+rq==1.16.2
+redis==5.0.8
+
+# testing
+pytest==8.3.3
+httpx==0.27.2
+fakeredis==2.24.1

@@ -1,0 +1,9 @@
+# Keep the build context minimal and secret-free.
+.env
+.env.*
+node_modules/
+.next/
+npm-debug.log*
+.git/
+_shims/
+coverage/

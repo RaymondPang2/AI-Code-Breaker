@@ -1,0 +1,124 @@
+# infra/docker-compose.prod.yml
+#
+# Production-oriented composition. SEPARATE from docker-compose.yml (dev), so
+# development and production configs never bleed into each other.
+#
+# SECRETS ARE NOT IN THIS FILE. Every sensitive value is read from the host
+# environment (or a root-owned, git-ignored env file passed with
+# `--env-file`). This file only references variable NAMES:
+#
+#   POSTGRES_PASSWORD, DATABASE_URL, REDIS_URL, ANTHROPIC_API_KEY, ...
+#
+# Run:
+#   docker compose -f infra/docker-compose.prod.yml --env-file /etc/acb/prod.env up -d
+#
+# The frontend is hosted SEPARATELY (e.g. Vercel/CDN) in the target
+# architecture and is intentionally not defined here; add it only if you want
+# to self-host it in the same stack.
+#
+# IMPORTANT — Docker socket exposure: the `worker` mounts the Docker socket so
+# it can launch runner containers. This is HIGHLY PRIVILEGED — a process that
+# can talk to the Docker daemon can generally obtain root on the host. It is
+# scoped to the worker ONLY; the internet-facing `api` service never gets it.
+# For a serious public service, replace socket mounting with a stronger,
+# remote sandbox (see SECURITY.md): a brokered rootless runner, or per-job
+# microVMs (Firecracker) / gVisor on an isolated execution node.
+
+services:
+  postgres:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?set POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:?set POSTGRES_DB}
+    volumes:
+      - acb_pgdata:/var/lib/postgresql/data
+    # Not published to the host by default — only the api/worker on the
+    # internal network reach it. Publish deliberately if you need external
+    # access (and then firewall it).
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7
+    restart: unless-stopped
+    command: ["redis-server", "--save", "60", "1", "--appendonly", "yes"]
+    volumes:
+      - acb_redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  api:
+    build:
+      context: ..
+      dockerfile: apps/backend/Dockerfile
+    image: ai-code-breaker-backend:latest
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: ${DATABASE_URL:?set DATABASE_URL}
+      REDIS_URL: ${REDIS_URL:?set REDIS_URL}
+      # The API never runs submitted code; keep it on the subprocess backend
+      # and, crucially, do NOT give it the Docker socket.
+      EXECUTION_BACKEND: subprocess
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-sonnet-4-5}
+      CORS_ALLOW_ORIGINS: ${CORS_ALLOW_ORIGINS:?set CORS_ALLOW_ORIGINS}
+      LOG_FORMAT: json
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      RATE_LIMIT_ENABLED: "true"
+    # Migrations are applied as a separate one-shot step (see the deployment
+    # checklist), NOT here, so image rollbacks don't imply schema changes.
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    ports:
+      - "${API_PORT:-8000}:8000"
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/ready').status==200 else 1)\""]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  worker:
+    build:
+      context: ..
+      dockerfile: apps/backend/Dockerfile
+    image: ai-code-breaker-backend:latest
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: ${DATABASE_URL:?set DATABASE_URL}
+      REDIS_URL: ${REDIS_URL:?set REDIS_URL}
+      # The worker DOES run submitted code — via the isolated Docker runner.
+      EXECUTION_BACKEND: ${WORKER_EXECUTION_BACKEND:-docker}
+      DOCKER_RUNNER_IMAGE: ${DOCKER_RUNNER_IMAGE:-ai-code-breaker-runner:latest}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-sonnet-4-5}
+      LOG_FORMAT: json
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    # HIGHLY PRIVILEGED: the socket mount is what lets the worker launch
+    # runner containers. Scope it to the worker only, run the worker on an
+    # isolated node, and prefer a rootless/remote daemon in production. See
+    # the security note at the top of this file.
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    command: ["python", "-m", "app.worker.run_worker"]
+
+volumes:
+  acb_pgdata:
+  acb_redisdata:

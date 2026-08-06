@@ -1,0 +1,12 @@
+# Keep the build context minimal and secret-free.
+.env
+.env.*
+*.sqlite
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+venv/
+benchmark/out/
+tests/
+.git/

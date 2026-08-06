@@ -1,0 +1,101 @@
+name: CI
+
+# Runs the full check suite on every push and pull request: backend tests,
+# frontend tests, linting, and type checking. No secrets are used — tests run
+# with QUEUE_EAGER=1 (jobs inline) against a throwaway SQLite database and a
+# mock AI provider, so no Postgres, Redis, or Anthropic key is required.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Cancel superseded runs on the same ref to save CI minutes (cost control).
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend (pytest)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: apps/backend/requirements.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run tests
+        # Inline jobs, throwaway SQLite, subprocess execution backend, rate
+        # limiting off — no external infrastructure needed. See conftest.py.
+        env:
+          QUEUE_EAGER: "1"
+          EXECUTION_BACKEND: subprocess
+          RATE_LIMIT_ENABLED: "0"
+        run: pytest -q
+
+  benchmark-smoke:
+    name: Benchmark (smoke)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: apps/backend/requirements.txt
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Run benchmark (seed 0)
+        # A fast, deterministic smoke run — fails the build if the benchmark
+        # harness or dataset regresses. Uses the mock AI provider (offline).
+        run: python -m benchmark.run --seed 0 --out /tmp/bench
+
+  frontend:
+    name: Frontend (lint, typecheck, test, build)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: apps/frontend/package-lock.json
+
+      - name: Install dependencies
+        # Prefer a reproducible install; fall back if no lockfile is committed.
+        run: npm ci || npm install
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Type check
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
+
+      - name: Build
+        # Build with a placeholder API URL so the production build path is
+        # exercised in CI (the real URL is injected at deploy-time build).
+        env:
+          NEXT_PUBLIC_API_URL: http://localhost:8000
+        run: npm run build

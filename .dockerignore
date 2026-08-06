@@ -1,0 +1,18 @@
+# Repo-root build context (used by infra/docker-compose*.yml for the backend
+# image). Keep the context lean and secret-free.
+**/.env
+**/.env.*
+**/__pycache__/
+**/*.pyc
+**/.pytest_cache/
+**/.venv/
+**/venv/
+**/node_modules/
+**/.next/
+.git/
+apps/frontend/
+docs/
+infra/
+**/*.sqlite
+apps/backend/benchmark/out/
+apps/backend/tests/
