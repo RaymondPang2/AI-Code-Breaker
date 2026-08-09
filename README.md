@@ -30,12 +30,12 @@ AI-generated code can appear correct while still failing on unusual inputs, boun
 
 AI Code Breaker helps uncover these problems by comparing two Python implementations:
 
-- A **candidate implementation** that may contain a bug
-- A **reference implementation** representing the expected behaviour
+- A **candidate implementation** that may contain a bug.
+- A **reference implementation** that represents the expected behaviour.
 
-The system generates test inputs, executes both implementations, compares their observed behaviour, and reports any confirmed differences.
+The system generates test inputs, executes both implementations, compares their observed behaviour, and reports the confirmed differences.
 
-AI is used to propose targeted test cases and explain verified failures. It is **not** used as the final correctness judge. Candidate and reference behaviour is determined through real code execution.
+AI is used to propose targeted test cases and explain verified failures. It is **not** used as the final judge of correctness. Candidate and reference behaviour is determined through real code execution.
 
 ### Example
 
