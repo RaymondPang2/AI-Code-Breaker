@@ -45,10 +45,10 @@ def _fake_execute_submission(results_by_source_and_input: dict):
 
 def _patched(results_by_source_and_input: dict):
     return patch(
-        "app.services.comparison_service.execute_submission",
-        side_effect=_fake_execute_submission(results_by_source_and_input),
+        "app.services.comparison_service.get_execute_function",
+        return_value=_fake_execute_submission(results_by_source_and_input),
     )
-
+    
 
 def test_matching_success_values_pass():
     results = {
@@ -210,13 +210,15 @@ def test_ordering_is_preserved():
 
 
 def test_no_test_inputs_short_circuits_without_calling_runner():
-    with patch("app.services.comparison_service.execute_submission") as mock_execute:
+    with patch("app.services.comparison_service.get_execute_function") as mock_get_execute:
+        fake_execute = mock_get_execute.return_value
         response = analyze_submission(_submission([]))
 
-    mock_execute.assert_not_called()
+    fake_execute.assert_not_called()
     assert response.total_tests == 0
     assert response.passed_tests == 0
     assert response.failed_tests == 0
+    assert response.inconclusive_tests == 0
     assert response.comparisons == []
     assert response.first_failing_input is None
 
