@@ -82,6 +82,7 @@ def test_second_largest_distinct_bug_is_found():
     assert (
         response.candidate_result.returned_value != response.reference_result.returned_value
         or response.candidate_result.status != response.reference_result.status
+        or response.candidate_result.exception_type != response.reference_result.exception_type
     )
 
 
