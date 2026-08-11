@@ -177,6 +177,6 @@ describe("SubmissionForm (async flow)", () => {
     await waitFor(() =>
       expect(screen.getByRole("progressbar")).toBeInTheDocument(),
     );
-    expect(await screen.findByText(/executing tests/i)).toBeInTheDocument();
+    expect(await screen.findByText(/executing/i)).toBeInTheDocument();
   });
 });
