@@ -164,11 +164,9 @@ describe("SubmissionForm (async flow)", () => {
       analysis_id: "a-1",
       status: "queued",
     });
-    mockedFetchRun
-      .mockResolvedValueOnce(
-        completedRun({ status: "executing_tests", progress: 0.4 }),
-      )
-      .mockResolvedValue(completedRun());
+    mockedFetchRun.mockResolvedValue(
+      completedRun({ status: "executing_tests", progress: 0.4 }),
+    );
 
     render(<SubmissionForm />);
     await user.click(screen.getByRole("button", { name: /load example/i }));
@@ -177,6 +175,6 @@ describe("SubmissionForm (async flow)", () => {
     await waitFor(() =>
       expect(screen.getByRole("progressbar")).toBeInTheDocument(),
     );
-    expect(await screen.findByText(/executing/i)).toBeInTheDocument();
+    expect(await screen.findByText(/executing tests/i)).toBeInTheDocument();
   });
 });
